@@ -43,7 +43,7 @@ services:
       - NEO4J_db_tx__log_rotation_retention__policy=false
       - NEO4J_dbms_security_procedures_unrestricted=apoc.*
     healthcheck:
-        test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider localhost:7474 || exit 1"]
+        test: ["CMD-SHELL", "wget --verbose --tries=1 --spider localhost:7474 || exit 1"]
         interval: 15s
         timeout: 30s
         retries: 10

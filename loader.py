@@ -7,6 +7,8 @@ from streamlit.logger import get_logger
 from chains import load_embedding_model
 from utils import create_constraints, create_vector_index
 from PIL import Image
+from PyPDF2 import PdfReader
+import io
 
 load_dotenv(".env")
 
@@ -49,6 +51,98 @@ def load_high_score_so_data() -> None:
     )
     data = requests.get(so_api_base_url + parameters).json()
     insert_so_data(data)
+
+def fetch_data(url):
+    response = requests.get(url)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        return None
+
+def fetch_israeli_laws(law_id):
+    url = f"https://knesset.gov.il/Odata/ParliamentInfo.svc/KNS_IsraelLaw({law_id})?$format=json&$expand=KNS_IsraelLawNames,KNS_LawBindings,KNS_IsraelLawMinsitries,KNS_IsraelLawClassificiations"
+    law_data = fetch_data(url)
+    return law_data
+
+def fetch_bill_name(law_id):
+    url = f"https://knesset.gov.il/Odata/ParliamentInfo.svc/KNS_Bill({law_id})?$format=json"
+    law_data = fetch_data(url)
+    if law_data:
+        return law_data["Name"]
+    return "No name"
+
+def fetch_pdf_link_from_bill(law_id):
+    url = f"https://knesset.gov.il/Odata/ParliamentInfo.svc/KNS_DocumentBill?$format=json&$filter=BillID%20eq%20{law_id}"
+    law_data = fetch_data(url)
+    if law_data:
+        for doc in law_data["value"]:
+            if doc["ApplicationDesc"] == "PDF":
+                return doc["FilePath"]
+    return "No link"
+
+def fetch_pdf_text_from_bill(law_id):
+    file_path_url = fetch_pdf_link_from_bill(law_id)
+    if file_path_url != "No link":
+        response = requests.get(file_path_url)
+        pdf_file = io.BytesIO(response.content)
+        reader = PdfReader(pdf_file)
+        text = []
+        for page in reader.pages:
+            text.append(page.extract_text())
+        return "\n".join(text)
+    return "No text or info"
+
+def process_law_data(law_id):
+    url = f"https://knesset.gov.il/Odata/ParliamentInfo.svc/KNS_IsraelLaw({law_id})?$format=json&$expand=KNS_IsraelLawNames,KNS_LawBindings,KNS_IsraelLawMinsitries,KNS_IsraelLawClassificiations"
+    law_data = fetch_data(url)
+    
+    if law_data:
+        # Create Law Node
+        law_properties = {
+            'names':', '.join([name['Name'] for name in law_data['KNS_IsraelLawNames']]),
+            'publication_date': law_data['PublicationDate'],
+            'latest_date': law_data['LatestPublicationDate'],
+            'classifications': [cls['ClassificiationDesc'] for cls in law_data['KNS_IsraelLawClassificiations']],
+            'validity': law_data['LawValidityDesc'],
+            'law_id': law_id,
+            'link': f"https://main.knesset.gov.il/activity/legislation/laws/pages/LawPrimary.aspx?t=lawlaws&st=lawlaws&lawitemid={law_id}"
+        }
+
+        neo4j_graph.query("""
+                CREATE (l:Law {
+                    names: $names,
+                    publication_date: $publication_date,
+                    latest_date: $latest_date,
+                    classifications: $classifications,
+                    validity: $validity,
+                    law_id: $law_id,
+                    link: $link
+                })
+            """, law_properties)
+        
+        # Process each binding as an Amendment Node
+        for binding in law_data['KNS_LawBindings']:
+            amendment_properties = {
+                'name': fetch_bill_name(binding['LawID']),
+                'type': binding['BindingTypeDesc'],
+                'publication_date': binding['LastUpdatedDate'],
+                'law_id': binding['LawID'],
+                'link': fetch_pdf_link_from_bill(binding['LawID']),
+                'text': fetch_pdf_text_from_bill(binding['LawID'])
+            }
+            neo4j_graph.query("""
+                    MERGE (a:Amendment {
+                        name: $name,
+                        type: $type,
+                        publication_date: $publication_date,
+                        law_id: $law_id,
+                        link: $link,
+                        text: $text
+                    })
+                    WITH a
+                    MATCH (l:Law {law_id: $parent_law_id})
+                    MERGE (a)-[r:AMENDS {date: $publication_date}]->(l)
+                """, {**amendment_properties, 'parent_law_id': law_id})
 
 
 def insert_so_data(data: dict) -> None:
@@ -127,8 +221,11 @@ def render_page():
     if st.button("Import", type="primary"):
         with st.spinner("Loading... This might take a minute or two."):
             try:
-                for page in range(1, num_pages + 1):
-                    load_so_data(user_input, start_page + (page - 1))
+                # for page in range(1, num_pages + 1):
+                #     load_so_data(user_input, start_page + (page - 1))
+                law_ids = list(range(2000001, 2000011))
+                for law_id in law_ids:
+                    process_law_data(law_id)
                 st.success("Import successful", icon="✅")
                 st.caption("Data model")
                 st.image(datamodel_image)
