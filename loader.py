@@ -64,14 +64,14 @@ def fetch_israeli_laws(law_id):
     law_data = fetch_data(url)
     return law_data
 
-def fetch_bill_name(law_id):
+def fetch_bill_name(law_id): #TODO: Use more sources, this lacks all info
     url = f"https://knesset.gov.il/Odata/ParliamentInfo.svc/KNS_Bill({law_id})?$format=json"
     law_data = fetch_data(url)
     if law_data:
         return law_data["Name"]
     return "No name"
 
-def fetch_pdf_link_from_bill(law_id):
+def fetch_pdf_link_from_bill(law_id): #TODO: Use more sources, this lacks all info
     url = f"https://knesset.gov.il/Odata/ParliamentInfo.svc/KNS_DocumentBill?$format=json&$filter=BillID%20eq%20{law_id}"
     law_data = fetch_data(url)
     if law_data:
@@ -125,7 +125,7 @@ def process_law_data(law_id):
             amendment_properties = {
                 'name': fetch_bill_name(binding['LawID']),
                 'type': binding['BindingTypeDesc'],
-                'publication_date': binding['LastUpdatedDate'],
+                'publication_date': binding['LastUpdatedDate'], #TODO: this is not the publication of the amendment! fix this.
                 'law_id': binding['LawID'],
                 'link': fetch_pdf_link_from_bill(binding['LawID']),
                 'text': fetch_pdf_text_from_bill(binding['LawID'])
@@ -225,7 +225,7 @@ def render_page():
                 #     load_so_data(user_input, start_page + (page - 1))
                 law_ids = list(range(2000001, 2000011))
                 for law_id in law_ids:
-                    process_law_data(law_id)
+                    process_law_data(law_id) #TODO: Run this over all laws and not by id.
                 st.success("Import successful", icon="✅")
                 st.caption("Data model")
                 st.image(datamodel_image)
