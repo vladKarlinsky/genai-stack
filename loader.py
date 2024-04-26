@@ -64,20 +64,37 @@ def fetch_israeli_laws(law_id):
     law_data = fetch_data(url)
     return law_data
 
-def fetch_bill_name(law_id): #TODO: Use more sources, this lacks all info
+def fetch_law_details(law_id): 
+    # Fetch data first from KNS_Bill entity
     url = f"https://knesset.gov.il/Odata/ParliamentInfo.svc/KNS_Bill({law_id})?$format=json"
-    law_data = fetch_data(url)
-    if law_data:
-        return law_data["Name"]
-    return "No name"
+    law_data_from_KNS_bill = fetch_data(url)
+    if law_data_from_KNS_bill:
+        return law_data_from_KNS_bill
+    # If no data, try KNS_Law entity
+    url = f"https://knesset.gov.il/Odata/ParliamentInfo.svc/KNS_Law({law_id})?$format=json"
+    law_data_from_KNS_law = fetch_data(url)
+    if law_data_from_KNS_law:
+        return law_data_from_KNS_law
+    # Return default value
+    return "No data"
 
-def fetch_pdf_link_from_bill(law_id): #TODO: Use more sources, this lacks all info
+
+def fetch_pdf_link_from_bill(law_id):
+    # Fetch data first from Bill entity
     url = f"https://knesset.gov.il/Odata/ParliamentInfo.svc/KNS_DocumentBill?$format=json&$filter=BillID%20eq%20{law_id}"
-    law_data = fetch_data(url)
-    if law_data:
-        for doc in law_data["value"]:
+    law_data_from_KNS_DocumentBill = fetch_data(url)
+    if law_data_from_KNS_DocumentBill:
+        for doc in law_data_from_KNS_DocumentBill["value"]:
             if doc["ApplicationDesc"] == "PDF":
                 return doc["FilePath"]
+    # If no data, try Law entity
+    url = f"https://knesset.gov.il/Odata/ParliamentInfo.svc/KNS_DocumentLaw?$format=json&$filter=LawID%20eq%20{law_id}"
+    law_data_from_KNS_DocumentLaw = fetch_data(url)
+    if law_data_from_KNS_DocumentLaw:
+        for doc in law_data_from_KNS_DocumentLaw["value"]:
+            if doc["ApplicationDesc"] == "PDF":
+                return doc["FilePath"]
+    # Return default value
     return "No link"
 
 def fetch_pdf_text_from_bill(law_id):
@@ -122,10 +139,11 @@ def process_law_data(law_id):
         
         # Process each binding as an Amendment Node
         for binding in law_data['KNS_LawBindings']:
+            law_details = fetch_law_details(binding['LawID'])
             amendment_properties = {
-                'name': fetch_bill_name(binding['LawID']),
+                'name': law_details["Name"] if isinstance(law_details, dict) and "Name" in law_details else law_details,
                 'type': binding['BindingTypeDesc'],
-                'publication_date': binding['LastUpdatedDate'], #TODO: this is not the publication of the amendment! fix this.
+                'publication_date': law_details["PublicationDate"] if isinstance(law_details, dict) and "PublicationDate" in law_details else law_details,
                 'law_id': binding['LawID'],
                 'link': fetch_pdf_link_from_bill(binding['LawID']),
                 'text': fetch_pdf_text_from_bill(binding['LawID'])
@@ -225,7 +243,7 @@ def render_page():
                 #     load_so_data(user_input, start_page + (page - 1))
                 law_ids = list(range(2000001, 2000011))
                 for law_id in law_ids:
-                    process_law_data(law_id) #TODO: Run this over all laws and not by id.
+                    process_law_data(law_id) # Execution time: 8:45 mins
                 st.success("Import successful", icon="✅")
                 st.caption("Data model")
                 st.image(datamodel_image)
